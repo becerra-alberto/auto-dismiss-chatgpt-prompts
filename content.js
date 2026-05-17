@@ -5,9 +5,34 @@ const PROMPT_TEXT_PATTERNS = [
 ];
 
 const BUTTON_TEXT_PATTERN = /^got it$/i;
-const CLICK_COOLDOWN_MS = 1500;
+const DEFAULT_SETTINGS = {
+  enabled: true,
+  cooldownMs: 1500,
+  strictMatch: true
+};
 
 let lastClickAt = 0;
+let settings = { ...DEFAULT_SETTINGS };
+
+chrome.storage.sync.get(DEFAULT_SETTINGS, (storedSettings) => {
+  settings = { ...DEFAULT_SETTINGS, ...storedSettings };
+  dismissMatchingPrompt();
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync") {
+    return;
+  }
+
+  settings = Object.fromEntries(
+    Object.entries(settings).map(([key, value]) => [
+      key,
+      changes[key] ? changes[key].newValue : value
+    ])
+  );
+
+  dismissMatchingPrompt();
+});
 
 function normalizeText(value) {
   return value.replace(/\s+/g, " ").trim();
@@ -28,7 +53,15 @@ function isVisible(element) {
 
 function looksLikeRateLimitDialog(container) {
   const text = normalizeText(container.innerText || container.textContent || "");
-  return PROMPT_TEXT_PATTERNS.every((pattern) => pattern.test(text));
+
+  if (settings.strictMatch) {
+    return PROMPT_TEXT_PATTERNS.every((pattern) => pattern.test(text));
+  }
+
+  return (
+    PROMPT_TEXT_PATTERNS[0].test(text) &&
+    PROMPT_TEXT_PATTERNS.slice(1).some((pattern) => pattern.test(text))
+  );
 }
 
 function findDismissButton(container) {
@@ -41,9 +74,13 @@ function findDismissButton(container) {
 }
 
 function dismissMatchingPrompt() {
+  if (!settings.enabled) {
+    return;
+  }
+
   const now = Date.now();
 
-  if (now - lastClickAt < CLICK_COOLDOWN_MS) {
+  if (now - lastClickAt < settings.cooldownMs) {
     return;
   }
 
